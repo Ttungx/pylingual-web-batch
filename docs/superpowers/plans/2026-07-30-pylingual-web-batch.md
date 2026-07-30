@@ -155,15 +155,15 @@ line-length = 100
 select = ["E", "F", "I", "UP", "B"]
 ```
 
-Create `__init__.py` with:
+Create `__init__.py` with only the version during Task 1:
 
 ```python
 __version__ = "0.1.0"
 
-from .models import BatchConfig, BatchSummary, TaskStatus
-
-__all__ = ["BatchConfig", "BatchSummary", "TaskStatus", "__version__"]
+__all__ = ["__version__"]
 ```
+
+Task 2 adds the model exports after `models.py` exists.
 
 Create `__main__.py` with:
 
@@ -649,7 +649,13 @@ class SourceResponse:
     decompilation_successful: bool
 
 class PylingualClient:
-    def __init__(self, base_url: str, timeout: float = 90.0, user_agent: str = "pylingual-web-batch/0.1"): ...
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 90.0,
+        user_agent: str = "pylingual-web-batch/0.1",
+        transport: httpx.BaseTransport | None = None,
+    ): ...
     def upload(self, path: Path) -> UploadResponse: ...
     def poll(self, identifier: str) -> ProgressResponse: ...
     def fetch_source(self, identifier: str) -> SourceResponse: ...
@@ -709,9 +715,9 @@ python -m pytest tests/test_api.py -q
 
 Expected: FAIL because `PylingualClient` does not exist.
 
-- [ ] **Step 3: Implement multipart upload**
+- [ ] **Step 3: Implement the injectable HTTP client and multipart upload**
 
-Use `httpx` `files={"file": (path.name, path.open("rb"), "application/octet-stream")}` and `data={"fileName": path.name}`. Close the file after the request. Require `success is True` and a non-empty identifier; otherwise raise `ApiResponseError`.
+Construct `httpx.Client(transport=transport, timeout=timeout, headers=...)` so tests can pass `httpx.MockTransport`; production callers omit `transport`. Use `files={"file": (path.name, path.open("rb"), "application/octet-stream")}` and `data={"fileName": path.name}`. Close the file after the request. Require `success is True` and a non-empty identifier; otherwise raise `ApiResponseError`.
 
 - [ ] **Step 4: Implement progress parsing**
 
