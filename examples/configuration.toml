@@ -1,0 +1,14 @@
+# Reference values for constructing BatchConfig or equivalent CLI flags.
+input_dir = "./input"
+output_dir = "./output"
+state_path = "./.pylingual-state.json"
+lock_path = "./.pylingual-batch.lock"
+base_url = "https://api.pylingual.io"
+concurrency = 1
+queue_limit = 10
+poll_timeout = 7200.0
+poll_interval = 10.0
+request_timeout = 90.0
+include = ["*.pyc"]
+exclude = []
+reupload = false
