@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -27,7 +28,14 @@ def build_parser() -> argparse.ArgumentParser:
         command.add_argument("--state", type=Path, required=True)
         command.add_argument("--input", type=Path, default=Path("."))
         command.add_argument("--output", type=Path, default=Path("."))
-        command.add_argument("--lock", type=Path, default=Path(".pylingual-batch.lock"))
+        command.add_argument(
+            "--lock-file",
+            "--lock",
+            dest="lock_path",
+            type=Path,
+            default=Path(".pylingual-batch.lock"),
+        )
+        command.add_argument("--log-format", choices=("text", "jsonl"), default="text")
         command.add_argument("--base-url", default="https://api.pylingual.io")
         command.add_argument("--poll-timeout", type=float, default=7200.0)
         command.add_argument("--poll-interval", type=float, default=10.0)
@@ -37,7 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--state", type=Path, default=Path(".pylingual-state.json"))
-    parser.add_argument("--lock", type=Path, default=Path(".pylingual-batch.lock"))
+    parser.add_argument(
+        "--lock-file",
+        "--lock",
+        dest="lock_path",
+        type=Path,
+        default=Path(".pylingual-batch.lock"),
+    )
+    parser.add_argument("--log-format", choices=("text", "jsonl"), default="text")
     parser.add_argument("--base-url", default="https://api.pylingual.io")
     parser.add_argument("-j", "--jobs", type=int, default=1)
     parser.add_argument("--queue-limit", type=int, default=10)
@@ -56,7 +71,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         config = _config_from_args(args)
         decompiler = BatchDecompiler(config)
         summary = getattr(decompiler, args.command)()
-        _print_summary(summary)
+        _print_summary(summary, args.log_format)
         return 1 if summary.failed else 0
     except (ConfigurationError, StateError, LockError) as exc:
         print(f"error: {exc}", file=sys.stderr)
@@ -69,7 +84,7 @@ def _config_from_args(args: argparse.Namespace) -> BatchConfig:
             input_dir=args.input,
             output_dir=args.output,
             state_path=args.state,
-            lock_path=args.lock,
+            lock_path=args.lock_path,
             base_url=args.base_url,
             concurrency=args.jobs,
             queue_limit=args.queue_limit,
@@ -84,7 +99,7 @@ def _config_from_args(args: argparse.Namespace) -> BatchConfig:
         input_dir=args.input,
         output_dir=args.output,
         state_path=args.state,
-        lock_path=args.lock,
+        lock_path=args.lock_path,
         base_url=args.base_url,
         poll_timeout=args.poll_timeout,
         poll_interval=args.poll_interval,
@@ -97,7 +112,22 @@ def _patterns(raw: str, default: tuple[str, ...]) -> tuple[str, ...]:
     return patterns or default
 
 
-def _print_summary(summary: BatchSummary) -> None:
+def _print_summary(summary: BatchSummary, log_format: str = "text") -> None:
+    if log_format == "jsonl":
+        print(
+            json.dumps(
+                {
+                    "event": "summary",
+                    "total": summary.total,
+                    "succeeded": summary.succeeded,
+                    "skipped": summary.skipped,
+                    "failed": summary.failed,
+                    "deferred": summary.deferred,
+                },
+                separators=(",", ":"),
+            )
+        )
+        return
     print(
         f"total={summary.total} succeeded={summary.succeeded} skipped={summary.skipped} "
         f"failed={summary.failed} deferred={summary.deferred}"

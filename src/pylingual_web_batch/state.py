@@ -49,6 +49,27 @@ class StateStore:
         data = {field: value.get(field) for field in _RECORD_FIELDS}
         data["status"] = TaskStatus(value.get("status"))
         data["attempts"] = value.get("attempts", 0)
+        if (
+            not isinstance(data["attempts"], int)
+            or isinstance(data["attempts"], bool)
+            or data["attempts"] < 0
+        ):
+            raise ValueError("attempts must be a non-negative integer")
+        for field in (
+            "identifier",
+            "last_stage",
+            "error",
+            "updated_at",
+            "input_path",
+            "output_path",
+        ):
+            if data[field] is not None and not isinstance(data[field], str):
+                raise ValueError(f"{field} must be a string or null")
+        position = data["last_position"]
+        if position is not None and (
+            not isinstance(position, int) or isinstance(position, bool) or position < 0
+        ):
+            raise ValueError("last_position must be a non-negative integer or null")
         return TaskRecord(**data)
 
     def get(self, key: str) -> TaskRecord | None:

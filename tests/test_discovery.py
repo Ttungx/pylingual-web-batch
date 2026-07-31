@@ -21,16 +21,15 @@ def test_discovery_applies_include_and_exclude_globs_and_skips_pycache(tmp_path:
     assert tasks[0].output_path == tmp_path / "out" / "pkg" / "keep.py"
 
 
-def test_discovery_is_sorted_and_custom_include_recurses(tmp_path: Path):
+def test_discovery_remains_pyc_only_with_custom_include(tmp_path: Path):
     root = tmp_path / "input"
-    (root / "z").mkdir(parents=True)
-    (root / "a").mkdir()
-    (root / "z" / "last.bin").write_bytes(b"z")
-    (root / "a" / "first.bin").write_bytes(b"a")
+    root.mkdir()
+    (root / "module.pyc").write_bytes(b"pyc")
+    (root / "notes.txt").write_text("text", encoding="utf-8")
 
-    tasks = discover_tasks(BatchConfig(root, tmp_path / "out", include=("*.bin",)))
+    tasks = discover_tasks(BatchConfig(root, tmp_path / "out", include=("*.txt", "*.pyc")))
 
-    assert [task.key for task in tasks] == ["a/first.bin", "z/last.bin"]
+    assert [task.key for task in tasks] == ["module.pyc"]
 
 
 def test_glob_pattern_is_anchored_to_whole_relative_key(tmp_path: Path):

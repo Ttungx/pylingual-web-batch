@@ -33,6 +33,17 @@ def test_corrupt_or_unsupported_state_is_not_overwritten(tmp_path: Path):
         assert path.read_text(encoding="utf-8") == contents
 
 
+def test_invalid_record_field_type_raises_state_error_without_overwrite(tmp_path: Path):
+    path = tmp_path / "state.json"
+    contents = '{"version":1,"tasks":{"x.pyc":{"status":"timeout","attempts":"one"}}}'
+    path.write_text(contents, encoding="utf-8")
+
+    with pytest.raises(StateError, match="attempts"):
+        StateStore(path)
+
+    assert path.read_text(encoding="utf-8") == contents
+
+
 def test_timeout_identifier_survives_new_store(tmp_path: Path):
     path = tmp_path / "state.json"
     StateStore(path).set(

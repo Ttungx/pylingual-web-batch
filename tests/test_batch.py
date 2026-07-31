@@ -2,6 +2,7 @@ from pathlib import Path
 
 from pylingual_web_batch.api import ProgressResponse, SourceResponse, UploadResponse
 from pylingual_web_batch.batch import BatchDecompiler
+from pylingual_web_batch.errors import ApiResponseError
 from pylingual_web_batch.models import BatchConfig, TaskRecord, TaskStatus
 from pylingual_web_batch.state import StateStore
 
@@ -157,9 +158,15 @@ def test_jobs_run_tasks_in_parallel(tmp_path: Path):
     release_first = threading.Event()
 
     class ParallelClient(FakeClient):
+        def __init__(self):
+            super().__init__()
+            self._poll_lock = threading.Lock()
+
         def poll(self, identifier):
-            self.polls.append(identifier)
-            if identifier == "new-1":
+            with self._poll_lock:
+                self.polls.append(identifier)
+                is_first = len(self.polls) == 1
+            if is_first:
                 first_poll_started.set()
                 assert release_first.wait(1), "second task did not run concurrently"
             else:
@@ -171,6 +178,139 @@ def test_jobs_run_tasks_in_parallel(tmp_path: Path):
         config(tmp_path, root, concurrency=2), client=ParallelClient()
     ).run()
     assert summary.succeeded == 2
+
+
+def test_poll_api_error_preserves_resumable_identifier(tmp_path: Path):
+    root = make_input(tmp_path, "a.pyc")
+    cfg = config(tmp_path, root)
+
+    class TransientClient(FakeClient):
+        def poll(self, identifier):
+            self.polls.append(identifier)
+            raise ApiResponseError("connection lost")
+
+    first_client = TransientClient()
+    first = BatchDecompiler(cfg, client=first_client).run()
+    record = StateStore(cfg.state_path).get("a.pyc")
+
+    assert first.deferred == 1
+    assert record is not None
+    assert record.status is TaskStatus.UPLOADED
+    assert record.identifier == "new-1"
+
+    second_client = FakeClient()
+    second = BatchDecompiler(cfg, client=second_client).run()
+    assert second.succeeded == 1
+    assert second_client.uploads == []
+    assert second_client.polls == ["new-1"]
+
+
+def test_fetch_api_error_preserves_resumable_identifier(tmp_path: Path):
+    root = make_input(tmp_path, "a.pyc")
+    cfg = config(tmp_path, root)
+
+    class TransientClient(FakeClient):
+        def fetch_source(self, identifier):
+            raise ApiResponseError("connection lost")
+
+    summary = BatchDecompiler(cfg, client=TransientClient()).run()
+    record = StateStore(cfg.state_path).get("a.pyc")
+
+    assert summary.deferred == 1
+    assert record is not None
+    assert record.status is TaskStatus.UPLOADED
+    assert record.identifier == "new-1"
+
+
+def test_instances_constructed_before_runs_reload_state_under_lock(tmp_path: Path):
+    root_a = make_input(tmp_path / "first", "a.pyc")
+    root_b = make_input(tmp_path / "second", "b.pyc")
+    cfg_a = config(tmp_path, root_a)
+    cfg_b = config(tmp_path, root_b)
+    first = BatchDecompiler(cfg_a, client=FakeClient())
+    second = BatchDecompiler(cfg_b, client=FakeClient())
+
+    first.run()
+    second.run()
+
+    records = StateStore(cfg_a.state_path).items()
+    assert set(records) == {"a.pyc", "b.pyc"}
+
+
+def test_concurrent_queue_reservation_limits_unobserved_uploads(tmp_path: Path):
+    import threading
+
+    root = make_input(tmp_path, "a.pyc", "b.pyc")
+    first_upload_started = threading.Event()
+
+    class UploadRaceClient(FakeClient):
+        def upload(self, path):
+            self.uploads.append(path)
+            first_upload_started.set()
+            return UploadResponse(f"new-{len(self.uploads)}", True)
+
+        def poll(self, identifier):
+            self.polls.append(identifier)
+            assert first_upload_started.is_set()
+            return ProgressResponse(identifier, "done", 1, True)
+
+    client = UploadRaceClient()
+    summary = BatchDecompiler(
+        config(tmp_path, root, concurrency=2, queue_limit=1),
+        client=client,
+        logger=lambda _: None,
+    ).run()
+
+    assert summary.succeeded == 1
+    assert summary.deferred == 1
+    assert len(client.uploads) == 1
+
+
+def test_output_write_error_preserves_resumable_identifier(tmp_path: Path):
+    root = make_input(tmp_path, "a.pyc")
+    output_parent = tmp_path / "out"
+    output_parent.write_text("not a directory", encoding="utf-8")
+    cfg = config(tmp_path, root)
+
+    summary = BatchDecompiler(cfg, client=FakeClient()).run()
+    record = StateStore(cfg.state_path).get("a.pyc")
+
+    assert summary.deferred == 1
+    assert record is not None
+    assert record.status is TaskStatus.UPLOADED
+    assert record.identifier == "new-1"
+
+
+def test_resume_uses_persisted_paths_without_current_discovery(tmp_path: Path):
+    original = tmp_path / "original"
+    root = make_input(original, "pkg/a.pyc")
+    cfg = config(original, root)
+    StateStore(cfg.state_path).set(
+        "pkg/a.pyc",
+        TaskRecord(
+            TaskStatus.TIMEOUT,
+            identifier="old-a",
+            input_path=str(root / "pkg/a.pyc"),
+            output_path=str(original / "out/pkg/a.py"),
+        ),
+    )
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    resume_cfg = BatchConfig(
+        elsewhere,
+        elsewhere,
+        state_path=cfg.state_path,
+        lock_path=cfg.lock_path,
+        poll_interval=0.001,
+    )
+    client = FakeClient()
+
+    summary = BatchDecompiler(resume_cfg, client=client).resume()
+
+    assert summary.succeeded == 1
+    assert client.uploads == []
+    assert client.polls == ["old-a"]
+    assert (original / "out/pkg/a.py").exists()
 
 
 def test_timeout_preserves_identifier(tmp_path: Path):

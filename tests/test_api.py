@@ -120,6 +120,48 @@ def test_retry_upload_resends_file_content(tmp_path: Path):
     assert all(b"bytecode-content" in body for body in bodies)
 
 
+def test_retry_transport_error_resends_file_content(tmp_path: Path):
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read())
+        if len(bodies) == 1:
+            raise httpx.ReadTimeout("connection dropped", request=request)
+        return response(request, {"success": True, "identifier": "abc"})
+
+    path = tmp_path / "module.pyc"
+    path.write_bytes(b"bytecode-content")
+    with PylingualClient(
+        "https://example.test",
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _: None,
+    ) as client:
+        result = client.upload(path)
+
+    assert result.identifier == "abc"
+    assert len(bodies) == 2
+    assert all(b"bytecode-content" in body for body in bodies)
+
+
+def test_remote_protocol_error_is_retried_and_normalized():
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.RemoteProtocolError("peer disconnected", request=request)
+
+    with PylingualClient(
+        "https://example.test",
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _: None,
+    ) as client:
+        with pytest.raises(ApiResponseError, match="pylingual request failed"):
+            client.poll("abc")
+
+    assert calls == 4
+
+
 def test_retry_503_then_success_and_do_not_retry_400():
     calls = 0
 

@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from urllib.parse import urlparse
 
 from .errors import ConfigurationError
 
@@ -46,6 +47,9 @@ class BatchConfig:
         object.__setattr__(self, "state_path", Path(self.state_path))
         object.__setattr__(self, "lock_path", Path(self.lock_path))
 
+        parsed_url = urlparse(self.base_url)
+        if parsed_url.scheme not in {"http", "https"} or not parsed_url.netloc:
+            raise ConfigurationError("base_url must be an absolute HTTP(S) URL")
         if self.concurrency < 1:
             raise ConfigurationError("concurrency must be at least 1")
         if self.queue_limit < 1:
@@ -76,3 +80,5 @@ class TaskRecord:
     last_position: int | None = None
     error: str | None = None
     updated_at: str | None = None
+    input_path: str | None = None
+    output_path: str | None = None

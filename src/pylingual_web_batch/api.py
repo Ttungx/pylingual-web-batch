@@ -117,9 +117,10 @@ class PylingualClient:
                 if not isinstance(payload, dict):
                     raise ApiResponseError("pylingual response is not an object")
                 return payload
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            except httpx.TransportError as exc:
                 if attempt == 3:
                     raise ApiResponseError(f"pylingual request failed: {exc}") from exc
+                self._rewind_files(kwargs.get("files"))
                 self._sleep(_RETRY_DELAYS[attempt])
             except ValueError as exc:
                 raise ApiResponseError("pylingual response is not valid JSON") from exc

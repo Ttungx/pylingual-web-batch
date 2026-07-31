@@ -9,11 +9,11 @@ from dataclasses import replace
 from pathlib import Path
 
 from .api import ProgressResponse, PylingualClient
-from .discovery import discover_tasks
+from .discovery import discover_tasks, map_output
 from .errors import ApiError, PermanentDecompilerError
 from .locking import RunLock
 from .models import BatchConfig, BatchSummary, TaskPlan, TaskRecord, TaskStatus
-from .queue import QueueGate
+from .queue import QueueGate, UploadReservation
 from .state import StateStore
 
 _RESUMABLE = {
@@ -41,7 +41,7 @@ class BatchDecompiler:
         self._owns_client = client is None
         self.logger = logger
         self.sleep = sleep
-        self.state = StateStore(config.state_path)
+        self.state: StateStore | None = None
         self.gate = QueueGate(config.queue_limit, logger)
 
     def _client(self) -> PylingualClient:
@@ -57,7 +57,7 @@ class BatchDecompiler:
 
     def status(self) -> BatchSummary:
         plans = {plan.key: plan for plan in discover_tasks(self.config)}
-        records = self.state.items()
+        records = StateStore(self.config.state_path).items()
         keys = sorted(set(plans) | set(records))
         statuses = []
         for key in keys:
@@ -76,8 +76,12 @@ class BatchDecompiler:
             self.client = PylingualClient(self.config.base_url, self.config.request_timeout)
         try:
             with RunLock(self.config.lock_path):
+                self.state = StateStore(self.config.state_path)
                 work: list[tuple[TaskPlan, TaskRecord | None]] = []
-                for plan in discover_tasks(self.config):
+                plans = discover_tasks(self.config)
+                if resume_only:
+                    plans = self._resume_plans(plans)
+                for plan in plans:
                     record = self.state.get(plan.key)
                     if resume_only and not _has_identifier(record):
                         statuses.append(record.status if record else TaskStatus.PENDING)
@@ -94,7 +98,25 @@ class BatchDecompiler:
                 self.client = None
         return _summary(statuses)
 
+    def _resume_plans(self, discovered: list[TaskPlan]) -> list[TaskPlan]:
+        assert self.state is not None
+        plans = {plan.key: plan for plan in discovered}
+        for key, record in self.state.items().items():
+            if not _has_identifier(record) or key in plans:
+                continue
+            input_path = (
+                Path(record.input_path) if record.input_path else self.config.input_dir / key
+            )
+            output_path = (
+                Path(record.output_path)
+                if record.output_path
+                else map_output(input_path, self.config.input_dir, self.config.output_dir)
+            )
+            plans[key] = TaskPlan(key, input_path, output_path)
+        return [plans[key] for key in sorted(plans)]
+
     def _process(self, plan: TaskPlan, record: TaskRecord | None) -> TaskStatus:
+        assert self.state is not None
         if plan.output_path.exists() and not self.config.reupload:
             self.state.set(plan.key, TaskRecord(TaskStatus.SKIPPED))
             return TaskStatus.SKIPPED
@@ -108,7 +130,8 @@ class BatchDecompiler:
             identifier = record.identifier
 
         if identifier is None:
-            if not self.gate.before_upload():
+            reservation = self.gate.reserve_upload()
+            if reservation is None:
                 return TaskStatus.PENDING
             attempts = (record.attempts if record else 0) + 1
             try:
@@ -119,20 +142,25 @@ class BatchDecompiler:
                     TaskStatus.UPLOADED,
                     identifier=identifier,
                     attempts=attempts,
+                    input_path=str(plan.input_path.resolve()),
+                    output_path=str(plan.output_path.resolve()),
                 )
                 self.state.set(plan.key, record)
             except ApiError as exc:
+                reservation.release()
                 self.state.set(
                     plan.key,
                     TaskRecord(TaskStatus.UPLOAD_FAIL, attempts=attempts, error=str(exc)),
                 )
                 return TaskStatus.UPLOAD_FAIL
+        else:
+            reservation = None
 
         return self._poll_and_write(
             plan,
             identifier,
             record or TaskRecord(TaskStatus.UPLOADED),
-            observe_queue=is_new_upload,
+            reservation=reservation if is_new_upload else None,
         )
 
     def _poll_and_write(
@@ -141,12 +169,13 @@ class BatchDecompiler:
         identifier: str,
         record: TaskRecord,
         *,
-        observe_queue: bool,
+        reservation: UploadReservation | None,
     ) -> TaskStatus:
         started = time.monotonic()
-        observed_upload = observe_queue
         while True:
             if time.monotonic() - started >= self.config.poll_timeout:
+                if reservation is not None:
+                    reservation.release()
                 self.state.set(
                     plan.key,
                     replace(record, status=TaskStatus.TIMEOUT, identifier=identifier),
@@ -163,9 +192,9 @@ class BatchDecompiler:
                     error=progress.message,
                 )
                 self.state.set(plan.key, record)
-                if observed_upload:
-                    self.gate.observe_upload(progress.position)
-                    observed_upload = False
+                if reservation is not None:
+                    reservation.observe(progress.position)
+                    reservation = None
                 if _is_complete(progress):
                     source = self._client().fetch_source(identifier)
                     if not source.decompilation_successful:
@@ -176,7 +205,22 @@ class BatchDecompiler:
                     _atomic_write(plan.output_path, source.source)
                     self.state.mark_done(plan.key)
                     return TaskStatus.DONE
+            except OSError as exc:
+                if reservation is not None:
+                    reservation.release()
+                self.state.set(
+                    plan.key,
+                    replace(
+                        record,
+                        status=TaskStatus.UPLOADED,
+                        identifier=identifier,
+                        error=str(exc),
+                    ),
+                )
+                return TaskStatus.UPLOADED
             except PermanentDecompilerError as exc:
+                if reservation is not None:
+                    reservation.release()
                 self.state.set(
                     plan.key,
                     replace(
@@ -188,16 +232,18 @@ class BatchDecompiler:
                 )
                 return TaskStatus.DECOMPILER_ERROR
             except ApiError as exc:
+                if reservation is not None:
+                    reservation.release()
                 self.state.set(
                     plan.key,
                     replace(
                         record,
-                        status=TaskStatus.FAILED,
+                        status=TaskStatus.UPLOADED,
                         identifier=identifier,
                         error=str(exc),
                     ),
                 )
-                return TaskStatus.FAILED
+                return TaskStatus.UPLOADED
             self.sleep(self.config.poll_interval)
 
 

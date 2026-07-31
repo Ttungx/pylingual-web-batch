@@ -31,6 +31,8 @@ def discover_tasks(config: BatchConfig) -> list[TaskPlan]:
         if not input_path.is_file():
             continue
         relative = input_path.relative_to(input_root)
+        if input_path.suffix.lower() != ".pyc":
+            continue
         if "__pycache__" in relative.parts:
             continue
 

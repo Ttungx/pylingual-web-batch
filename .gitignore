@@ -12,3 +12,4 @@ build/
 *.log
 *.lock
 .pylingual-state.json
+.superpowers/
