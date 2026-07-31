@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.1.1 - 2026-07-31
+
+- Synchronized the runtime package version with the `0.1.1` distribution metadata.
+- Added the PyPI Trusted Publishing workflow and bilingual README links.
+
 ## 0.1.0 - 2026-07-30
 
 - Added deterministic recursive discovery with configurable anchored include and exclude patterns.
