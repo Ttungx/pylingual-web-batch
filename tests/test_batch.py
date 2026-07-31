@@ -52,6 +52,17 @@ def config(tmp_path: Path, root: Path, **kwargs) -> BatchConfig:
     )
 
 
+def test_status_does_not_create_http_client(monkeypatch, tmp_path: Path):
+    root = make_input(tmp_path, "a.pyc")
+
+    def fail_client(*args, **kwargs):
+        raise AssertionError("status must not create an HTTP client")
+
+    monkeypatch.setattr("pylingual_web_batch.batch.PylingualClient", fail_client)
+    summary = BatchDecompiler(config(tmp_path, root)).status()
+    assert summary.total == 1
+
+
 def test_existing_output_is_skipped(tmp_path: Path):
     root = make_input(tmp_path, "a.pyc")
     output = tmp_path / "out" / "a.py"
@@ -136,6 +147,30 @@ def test_permanent_error_is_persisted_and_not_reuploaded(tmp_path: Path):
     record = StateStore(cfg.state_path).get("a.pyc")
     assert record is not None
     assert record.status is TaskStatus.DECOMPILER_ERROR
+
+
+def test_jobs_run_tasks_in_parallel(tmp_path: Path):
+    import threading
+
+    root = make_input(tmp_path, "a.pyc", "b.pyc")
+    first_poll_started = threading.Event()
+    release_first = threading.Event()
+
+    class ParallelClient(FakeClient):
+        def poll(self, identifier):
+            self.polls.append(identifier)
+            if identifier == "new-1":
+                first_poll_started.set()
+                assert release_first.wait(1), "second task did not run concurrently"
+            else:
+                assert first_poll_started.is_set()
+                release_first.set()
+            return ProgressResponse(identifier, "done", 0, True)
+
+    summary = BatchDecompiler(
+        config(tmp_path, root, concurrency=2), client=ParallelClient()
+    ).run()
+    assert summary.succeeded == 2
 
 
 def test_timeout_preserves_identifier(tmp_path: Path):

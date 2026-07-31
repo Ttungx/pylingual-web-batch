@@ -108,6 +108,7 @@ class PylingualClient:
                 response = self._client.request(method, url, **kwargs)
                 if response.status_code == 429 or response.status_code >= 500:
                     if attempt < 3:
+                        self._rewind_files(kwargs.get("files"))
                         self._sleep(_RETRY_DELAYS[attempt])
                         continue
                 if response.is_error:
@@ -123,6 +124,14 @@ class PylingualClient:
             except ValueError as exc:
                 raise ApiResponseError("pylingual response is not valid JSON") from exc
         raise ApiResponseError("pylingual request failed")
+
+    @staticmethod
+    def _rewind_files(files: Any) -> None:
+        if not isinstance(files, dict):
+            return
+        for value in files.values():
+            if isinstance(value, tuple) and len(value) >= 2 and hasattr(value[1], "seek"):
+                value[1].seek(0)
 
     def close(self) -> None:
         self._client.close()

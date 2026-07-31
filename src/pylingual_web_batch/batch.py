@@ -4,6 +4,7 @@ import os
 import tempfile
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 
@@ -36,12 +37,17 @@ class BatchDecompiler:
         sleep: Callable[[float], None] = time.sleep,
     ):
         self.config = config
-        self.client = client or PylingualClient(config.base_url, config.request_timeout)
+        self.client = client
         self._owns_client = client is None
         self.logger = logger
         self.sleep = sleep
         self.state = StateStore(config.state_path)
         self.gate = QueueGate(config.queue_limit, logger)
+
+    def _client(self) -> PylingualClient:
+        if self.client is None:
+            raise RuntimeError("HTTP client is unavailable outside run or resume")
+        return self.client
 
     def run(self) -> BatchSummary:
         return self._execute(resume_only=False)
@@ -66,17 +72,26 @@ class BatchDecompiler:
 
     def _execute(self, resume_only: bool) -> BatchSummary:
         statuses: list[TaskStatus] = []
+        if self.client is None:
+            self.client = PylingualClient(self.config.base_url, self.config.request_timeout)
         try:
             with RunLock(self.config.lock_path):
+                work: list[tuple[TaskPlan, TaskRecord | None]] = []
                 for plan in discover_tasks(self.config):
                     record = self.state.get(plan.key)
                     if resume_only and not _has_identifier(record):
                         statuses.append(record.status if record else TaskStatus.PENDING)
-                        continue
-                    statuses.append(self._process(plan, record))
+                    else:
+                        work.append((plan, record))
+                if self.config.concurrency == 1:
+                    statuses.extend(self._process(plan, record) for plan, record in work)
+                else:
+                    with ThreadPoolExecutor(max_workers=self.config.concurrency) as executor:
+                        statuses.extend(executor.map(lambda args: self._process(*args), work))
         finally:
-            if self._owns_client:
+            if self._owns_client and self.client is not None:
                 self.client.close()
+                self.client = None
         return _summary(statuses)
 
     def _process(self, plan: TaskPlan, record: TaskRecord | None) -> TaskStatus:
@@ -97,7 +112,7 @@ class BatchDecompiler:
                 return TaskStatus.PENDING
             attempts = (record.attempts if record else 0) + 1
             try:
-                upload = self.client.upload(plan.input_path)
+                upload = self._client().upload(plan.input_path)
                 identifier = upload.identifier
                 is_new_upload = True
                 record = TaskRecord(
@@ -138,7 +153,7 @@ class BatchDecompiler:
                 )
                 return TaskStatus.TIMEOUT
             try:
-                progress = self.client.poll(identifier)
+                progress = self._client().poll(identifier)
                 record = replace(
                     record,
                     status=TaskStatus.UPLOADED,
@@ -152,7 +167,7 @@ class BatchDecompiler:
                     self.gate.observe_upload(progress.position)
                     observed_upload = False
                 if _is_complete(progress):
-                    source = self.client.fetch_source(identifier)
+                    source = self._client().fetch_source(identifier)
                     if not source.decompilation_successful:
                         raise PermanentDecompilerError("decompilation was unsuccessful")
                     if not source.source:
@@ -192,7 +207,7 @@ def _has_identifier(record: TaskRecord | None) -> bool:
 
 def _is_complete(progress: ProgressResponse) -> bool:
     stage = (progress.stage or "").lower()
-    return progress.success is True and stage in _DONE_STAGES
+    return stage in _DONE_STAGES
 
 
 def _atomic_write(path: Path, source: str) -> None:

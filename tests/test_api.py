@@ -56,6 +56,15 @@ def test_poll_rejects_false_success_before_completion():
             client.poll("abc")
 
 
+def test_completed_stage_with_false_success_is_still_fetchable():
+    payload = {"success": False, "stage": "done", "message": "partial"}
+    transport = httpx.MockTransport(lambda request: response(request, payload))
+    with PylingualClient("https://example.test", transport=transport) as client:
+        progress = client.poll("abc")
+    assert progress.stage == "done"
+    assert progress.success is False
+
+
 def test_fetch_source_preserves_source():
     payload = {
         "editor_content": {"file_raw_python": {"editor_content": "print('x')\n"}},
@@ -66,6 +75,28 @@ def test_fetch_source_preserves_source():
         result = client.fetch_source("abc")
     assert result.source == "print('x')\n"
     assert result.decompilation_successful is True
+
+
+def test_retry_upload_resends_file_content(tmp_path: Path):
+    bodies = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(request.read())
+        if len(bodies) == 1:
+            return response(request, {"message": "busy"}, 503)
+        return response(request, {"success": True, "identifier": "abc"})
+
+    path = tmp_path / "module.pyc"
+    path.write_bytes(b"bytecode-content")
+    with PylingualClient(
+        "https://example.test",
+        transport=httpx.MockTransport(handler),
+        sleep=lambda _: None,
+    ) as client:
+        client.upload(path)
+
+    assert len(bodies) == 2
+    assert all(b"bytecode-content" in body for body in bodies)
 
 
 def test_retry_503_then_success_and_do_not_retry_400():
