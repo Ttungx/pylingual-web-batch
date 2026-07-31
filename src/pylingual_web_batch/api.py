@@ -76,7 +76,7 @@ class PylingualClient:
         return UploadResponse(identifier, True, _optional_str(payload.get("message")))
 
     def poll(self, identifier: str) -> ProgressResponse:
-        payload = self._request_json("GET", f"/progress/{identifier}")
+        payload = self._request_json("GET", "/get_progress", params={"identifier": identifier})
         stage = _optional_str(payload.get("stage"))
         success = payload.get("success")
         message = _optional_str(payload.get("message"))
@@ -90,7 +90,7 @@ class PylingualClient:
         return ProgressResponse(response_identifier, stage, position, success, message)
 
     def fetch_source(self, identifier: str) -> SourceResponse:
-        payload = self._request_json("GET", f"/source/{identifier}")
+        payload = self._request_json("GET", "/view_chimera", params={"identifier": identifier})
         try:
             source = payload["editor_content"]["file_raw_python"]["editor_content"]
         except (KeyError, TypeError) as exc:

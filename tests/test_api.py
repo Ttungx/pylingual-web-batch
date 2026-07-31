@@ -31,6 +31,27 @@ def test_upload_sends_multipart_and_returns_identifier(tmp_path: Path):
     assert b"module.pyc" in seen["body"]
 
 
+def test_progress_and_source_use_documented_endpoints():
+    seen = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.url.path, request.url.params.get("identifier")))
+        if request.url.path == "/get_progress":
+            return response(request, {"success": True, "stage": "working"})
+        return response(
+            request,
+            {"editor_content": {"file_raw_python": {"editor_content": "source"}}},
+        )
+
+    with PylingualClient(
+        "https://example.test", transport=httpx.MockTransport(handler)
+    ) as client:
+        client.poll("abc")
+        client.fetch_source("abc")
+
+    assert seen == [("/get_progress", "abc"), ("/view_chimera", "abc")]
+
+
 def test_poll_extracts_queue_position_and_permanent_failure():
     replies = iter(
         [
