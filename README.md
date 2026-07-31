@@ -1,5 +1,7 @@
 # pylingual-web-batch
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 Resumable, queue-aware batch decompilation through the pylingual Web API.
 
 ## Installation
