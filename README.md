@@ -21,7 +21,9 @@ python -m pip install pylingual-web-batch
 The repository includes a PyPI Trusted Publishing workflow. After configuring the
 `pypi` GitHub environment as a trusted publisher for `Ttungx/pylingual-web-batch`
 on PyPI, publishing a GitHub Release automatically publishes the distributions.
-No PyPI token is stored in the repository.
+No PyPI token is stored in the repository. Because GitHub does not recursively trigger
+workflows from a `GITHUB_TOKEN`-created release, the workflow listens for a successful
+`release` workflow via `workflow_run` and also supports manual `workflow_dispatch` recovery.
 
 Before publishing, validate distributions locally:
 

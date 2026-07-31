@@ -39,6 +39,8 @@ python -m pip install pylingual-web-batch
 仓库已配置 PyPI Trusted Publishing 工作流。管理员在 PyPI 项目设置中将
 `Ttungx/pylingual-web-batch` 的 `pypi` environment 配置为可信发布者后，
 创建并发布 GitHub Release 即可自动发布到 PyPI。工作流不保存 PyPI Token。
+如果 GitHub 使用 `GITHUB_TOKEN` 创建 Release，GitHub 不会递归触发 release 事件；本项目已用
+`workflow_run` 监听成功的 `release` workflow，并保留 `workflow_dispatch` 作为手动补发入口。
 
 发布前先在本地检查：
 

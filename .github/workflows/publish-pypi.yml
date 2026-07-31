@@ -1,8 +1,17 @@
 name: publish-pypi
 
 on:
-  release:
-    types: [published]
+  # workflow_run is used because release.yml creates the GitHub Release with
+  # GITHUB_TOKEN, which does not recursively trigger a release event workflow.
+  workflow_run:
+    workflows: ["release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish (for example, v0.1.1)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -10,12 +19,19 @@ permissions:
 
 jobs:
   publish:
+    # Do not publish when the release validation workflow failed.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/p/pylingual-web-batch
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the released tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
 
       - uses: actions/setup-python@v5
         with:
