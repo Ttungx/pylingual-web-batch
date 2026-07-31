@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path, PurePosixPath
+from fnmatch import fnmatchcase
+from pathlib import Path
 
 from .models import BatchConfig, TaskPlan
 
@@ -9,9 +10,9 @@ __all__ = ["discover_tasks", "map_output"]
 
 def map_output(input_path: Path, input_root: Path, output_root: Path) -> Path:
     """Map an input .pyc path to its output .py path under the output root."""
-    input_path = Path(input_path)
-    input_root = Path(input_root)
-    output_root = Path(output_root)
+    input_path = Path(input_path).resolve()
+    input_root = Path(input_root).resolve()
+    output_root = Path(output_root).resolve()
 
     relative = input_path.relative_to(input_root)
     return output_root / relative.with_suffix(".py")
@@ -19,11 +20,16 @@ def map_output(input_path: Path, input_root: Path, output_root: Path) -> Path:
 
 def discover_tasks(config: BatchConfig) -> list[TaskPlan]:
     """Discover batch tasks under the configured input directory."""
-    input_root = Path(config.input_dir)
-    output_root = Path(config.output_dir)
+    input_root = Path(config.input_dir).resolve()
+    output_root = Path(config.output_dir).resolve()
     tasks: list[TaskPlan] = []
 
-    for input_path in input_root.rglob("*.pyc"):
+    if not input_root.is_dir():
+        return tasks
+
+    for input_path in input_root.rglob("*"):
+        if not input_path.is_file():
+            continue
         relative = input_path.relative_to(input_root)
         if "__pycache__" in relative.parts:
             continue
@@ -47,5 +53,11 @@ def discover_tasks(config: BatchConfig) -> list[TaskPlan]:
 
 
 def _matches_any(key: str, patterns: tuple[str, ...]) -> bool:
-    path = PurePosixPath(key)
-    return any(path.match(pattern) for pattern in patterns)
+    return any(_match_relative_key(key, pattern) for pattern in patterns)
+
+
+def _match_relative_key(key: str, pattern: str) -> bool:
+    """Match a complete POSIX key; slashless patterns apply to every basename."""
+    normalized = pattern.replace("\\", "/").lstrip("./")
+    candidate = key if "/" in normalized else key.rsplit("/", 1)[-1]
+    return fnmatchcase(candidate, normalized)
