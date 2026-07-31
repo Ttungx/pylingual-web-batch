@@ -12,10 +12,30 @@ The project has not been published to PyPI. Install it from GitHub or a local ch
 python -m pip install "git+https://github.com/ttungx/pylingual-web-batch.git"
 ```
 
-After a future PyPI release, installation will be:
+After a PyPI release, install with:
 
 ```bash
 python -m pip install pylingual-web-batch
+```
+
+The repository includes a PyPI Trusted Publishing workflow. After configuring the
+`pypi` GitHub environment as a trusted publisher for `Ttungx/pylingual-web-batch`
+on PyPI, publishing a GitHub Release automatically publishes the distributions.
+No PyPI token is stored in the repository.
+
+Before publishing, validate distributions locally:
+
+```bash
+python -m pip install --upgrade build twine
+python -m build
+python -m twine check dist/*
+```
+
+Package versions cannot be uploaded twice. Create a new version tag for each release:
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 ## Quick start
