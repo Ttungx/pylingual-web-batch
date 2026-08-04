@@ -18,7 +18,13 @@
 
 ## 安装
 
-当前尚未发布到 PyPI，可以直接从 GitHub 安装：
+项目已发布到 PyPI，直接安装：
+
+```bash
+python -m pip install pylingual-web-batch
+```
+
+也可以从 GitHub 安装最新开发版本：
 
 ```bash
 python -m pip install "git+https://github.com/ttungx/pylingual-web-batch.git"
@@ -29,36 +35,6 @@ python -m pip install "git+https://github.com/ttungx/pylingual-web-batch.git"
 ```bash
 python -m pip install -e ".[dev]"
 ```
-
-发布到 PyPI 后可以使用：
-
-```bash
-python -m pip install pylingual-web-batch
-```
-
-仓库已配置 PyPI Trusted Publishing 工作流。管理员在 PyPI 项目设置中将
-`Ttungx/pylingual-web-batch` 的 `pypi` environment 配置为可信发布者后，
-创建并发布 GitHub Release 即可自动发布到 PyPI。工作流不保存 PyPI Token。
-如果 GitHub 使用 `GITHUB_TOKEN` 创建 Release，GitHub 不会递归触发 release 事件；本项目已用
-`workflow_run` 监听成功的 `release` workflow，并保留 `workflow_dispatch` 作为手动补发入口。
-
-发布前先在本地检查：
-
-```bash
-python -m pip install --upgrade build twine
-rm -rf dist build *.egg-info
-python -m build
-python -m twine check dist/*
-```
-
-然后创建新版本标签并发布 GitHub Release：
-
-```bash
-git tag v0.1.1
-git push origin v0.1.1
-```
-
-版本号不能重复；正式发布后不要重新上传同一个版本号。
 
 ## 快速开始
 
@@ -240,13 +216,13 @@ python -m build
 
 测试使用 `httpx.MockTransport` 或 fake client，不会访问真实 pylingual 服务。
 
-GitHub Actions 会在 Python 3.10 至 3.13 上运行测试并构建安装包。推送 `v*` 标签时，
-GitHub Release workflow 会构建并上传 wheel 和源码包；项目目前不自动发布到 PyPI。
+GitHub Actions 会在 Python 3.10 至 3.13 上运行测试并构建安装包。
 
 ## 相关链接
 
 - GitHub 仓库：<https://github.com/ttungx/pylingual-web-batch>
 - 最新 Release：<https://github.com/ttungx/pylingual-web-batch/releases>
+- PyPI 页面：<https://pypi.org/project/pylingual-web-batch/>
 - 英文文档：[`README.md`](README.md)
 
 ## 许可证

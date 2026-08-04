@@ -6,38 +6,14 @@ Resumable, queue-aware batch decompilation through the pylingual Web API.
 
 ## Installation
 
-The project has not been published to PyPI. Install it from GitHub or a local checkout:
-
-```bash
-python -m pip install "git+https://github.com/ttungx/pylingual-web-batch.git"
-```
-
-After a PyPI release, install with:
-
 ```bash
 python -m pip install pylingual-web-batch
 ```
 
-The repository includes a PyPI Trusted Publishing workflow. After configuring the
-`pypi` GitHub environment as a trusted publisher for `Ttungx/pylingual-web-batch`
-on PyPI, publishing a GitHub Release automatically publishes the distributions.
-No PyPI token is stored in the repository. Because GitHub does not recursively trigger
-workflows from a `GITHUB_TOKEN`-created release, the workflow listens for a successful
-`release` workflow via `workflow_run` and also supports manual `workflow_dispatch` recovery.
-
-Before publishing, validate distributions locally:
+Or install the latest development version from GitHub:
 
 ```bash
-python -m pip install --upgrade build twine
-python -m build
-python -m twine check dist/*
-```
-
-Package versions cannot be uploaded twice. Create a new version tag for each release:
-
-```bash
-git tag v0.1.1
-git push origin v0.1.1
+python -m pip install "git+https://github.com/ttungx/pylingual-web-batch.git"
 ```
 
 ## Quick start
@@ -125,5 +101,4 @@ python -m build
 ```
 
 Tests use `httpx.MockTransport` and never call the live pylingual API. GitHub Actions tests Python
-3.10 through 3.13 and builds distributions. Tagged releases attach artifacts to GitHub Releases;
-there is intentionally no PyPI publishing step.
+3.10 through 3.13 and builds distributions.
